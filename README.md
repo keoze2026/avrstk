@@ -14,6 +14,60 @@ npm run dev            # or: npm run build && npm start
 
 There is no default API key. The bot answers stats commands only in chats where an admin has run `/setapikey`.
 
+## Deploy on a VPS with PM2
+
+Run only **one** copy of the bot per token. Stop any local `npm run dev` first, or Telegram
+rejects the second one with `409 Conflict`.
+
+On the VPS (Ubuntu/Debian), once:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pm2
+mkdir -p ~/avrstk
+```
+
+From your machine (PowerShell, in the project folder), copy the code and `.env`:
+
+```powershell
+tar -czf avrstk.tgz src package.json package-lock.json tsconfig.json ecosystem.config.js .env.example README.md
+scp avrstk.tgz .env USER@VPS_IP:~/avrstk/
+# optional: keep the group settings you already made locally
+scp -r data USER@VPS_IP:~/avrstk/
+```
+
+On the VPS:
+
+```bash
+cd ~/avrstk
+tar -xzf avrstk.tgz && rm avrstk.tgz
+npm ci
+npm run build
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup        # then run the sudo command it prints, so the bot starts after a reboot
+```
+
+Day to day:
+
+```bash
+pm2 status
+pm2 logs avrstk-bot          # live logs (Ctrl+C to leave)
+pm2 restart avrstk-bot
+pm2 stop avrstk-bot
+```
+
+Updating: copy the new `avrstk.tgz` over as above, then on the VPS:
+
+```bash
+cd ~/avrstk && tar -xzf avrstk.tgz && rm avrstk.tgz
+npm ci && npm run build
+pm2 restart ecosystem.config.js
+```
+
+Group settings live in `data/groups.json` on the VPS; the update steps never overwrite it.
+
 ## Setting up a group
 
 1. Add the bot to the group. Make it an admin with **Delete messages** so `/setapikey` can remove the key from the chat.
