@@ -92,8 +92,38 @@ const requireConfigure = async (ctx: Context): Promise<boolean> => {
 
 // Platform-wide stats are hidden from buyer groups and, when ADMIN_CHAT_IDS is set, from other chats
 const canViewPlatform = (chatId: number, group: GroupSettings): boolean => {
-  if (group.buyer) return false;
+  if (group.buyer || group.buyerKey) return false;
   return config.adminChatIds.length === 0 || config.adminChatIds.includes(chatId);
+};
+
+// A chat whose key was set with "/setapikey KEY buyer" only gets /viewdestinations (and /help).
+// Setup commands still work for admins but are not shown; anything else is ignored without a reply.
+const BUYER_KEY_COMMANDS = ['viewdestinations', 'start', 'help'];
+const BUYER_KEY_ADMIN_COMMANDS = ['setapikey', 'setworkspace', 'setbuyer', 'settings', 'changedate', 'cancel', 'stopauto'];
+const BUYER_KEY_REPORTS = ['viewdestinations'];
+
+bot.use(async (ctx, next) => {
+  const text = (ctx.message as any)?.text as string | undefined;
+  const command = text?.match(/^\/(\w+)/)?.[1].toLowerCase();
+  if (!command || !ctx.chat || !getGroup(ctx.chat.id).buyerKey || BUYER_KEY_COMMANDS.includes(command)) return next();
+  if (BUYER_KEY_ADMIN_COMMANDS.includes(command) && (await canConfigure(ctx))) return next();
+});
+
+// Buyer-key chats get their own command menu; other chats use the bot-wide one
+const syncChatCommands = async (chatId: number): Promise<void> => {
+  const scope = { type: 'chat' as const, chat_id: chatId };
+  try {
+    if (getGroup(chatId).buyerKey) {
+      await bot.telegram.setMyCommands(
+        [{ command: 'viewdestinations', description: 'Live and incoming for your numbers. Add start MINUTES or stop' }],
+        { scope }
+      );
+    } else {
+      await bot.telegram.deleteMyCommands({ scope });
+    }
+  } catch (error) {
+    logError(`Command menu for chat ${chatId}`, error);
+  }
 };
 
 const requireCredentials = async (ctx: Context, group: GroupSettings): Promise<ApiCredentials | null> => {
@@ -197,11 +227,19 @@ const applyDate = async (ctx: Context, input: string): Promise<void> => {
   );
 };
 
+const buyerKeyHelpText = (chatId: number): string =>
+  `<b>Avortyx Stats Bot</b>\n\n` +
+  `/viewdestinations — Live and incoming for your numbers that received calls\n` +
+  `/viewdestinations start MINUTES — Post it now and then every MINUTES in this chat (group admins)\n` +
+  `/viewdestinations stop — Stop posting it (group admins)\n\n` +
+  `Stats are for ${escapeHtml(chatPeriod(chatId).label || `today (${config.timezone})`)}.`;
+
 const helpText = (): string =>
   `<b>Avortyx Stats Bot</b>\n\n` +
   `<b>Setup (group admins):</b>\n` +
   `/setworkspace NAME — Use a different API address from the bot config (optional)\n` +
   `/setapikey KEY — Set this chat's API key (required)\n` +
+  `/setapikey KEY buyer — Use a buyer's own key: the chat then only gets /viewdestinations\n` +
   `/setbuyer NAME — Link this group to a buyer\n` +
   `/settings — Show this group's setup\n\n` +
   `<b>Statistics:</b>\n` +
@@ -222,7 +260,8 @@ const helpText = (): string =>
 
 // General commands
 bot.command(['start', 'help'], async ctx => {
-  await replyHtml(ctx, helpText());
+  const chatId = getChatId(ctx);
+  await replyHtml(ctx, getGroup(chatId).buyerKey ? buyerKeyHelpText(chatId) : helpText());
 });
 
 bot.command('settings', async ctx => {
@@ -235,7 +274,8 @@ bot.command('settings', async ctx => {
     `<b>Settings for this chat</b>\n\n` +
     `Chat ID: <code>${chatId}</code>\n` +
     `Workspace: ${escapeHtml(group.workspace || 'default')}\n` +
-    `API key: ${creds ? escapeHtml(maskKey(creds.apiKey)) : 'not set (use /setapikey KEY)'}\n` +
+    `API key: ${creds ? escapeHtml(maskKey(creds.apiKey)) : 'not set (use /setapikey KEY)'}` +
+    `${group.buyerKey ? ' (buyer key: only /viewdestinations)' : ''}\n` +
     `Buyer: ${escapeHtml(group.buyer || 'not set (platform view)')}\n` +
     `Date: ${escapeHtml(chatPeriod(chatId).label || `today (${todayInTimezone()})`)}\n` +
     `Autoruns: ${escapeHtml(describeAutoruns(group))}`
@@ -301,14 +341,19 @@ bot.command('setworkspace', async ctx => {
 bot.command('setapikey', async ctx => {
   if (!(await requireConfigure(ctx))) return;
   const chatId = getChatId(ctx);
-  const key = getArgs(ctx);
+  const [key = '', mode, ...extra] = getArgs(ctx).split(/\s+/);
+  const usage =
+    'Usage: /setapikey KEY [buyer]\n' +
+    'Add buyer when it is a buyer\'s own key: the chat then only gets /viewdestinations.\n' +
+    'The message with the key is deleted after it is read.';
 
   if (!key) {
-    await ctx.reply('Usage: /setapikey KEY\nThe message with the key is deleted after it is read.');
+    await ctx.reply(usage);
     return;
   }
   if (CLEAR_WORDS.includes(key.toLowerCase())) {
-    updateGroup(chatId, { apiKey: undefined, title: (ctx.chat as any).title });
+    updateGroup(chatId, { apiKey: undefined, buyerKey: undefined, title: (ctx.chat as any).title });
+    await syncChatCommands(chatId);
     await ctx.reply('API key cleared. Stats commands will not work in this chat until /setapikey is used again.');
     return;
   }
@@ -321,6 +366,12 @@ bot.command('setapikey', async ctx => {
     deleted = false;
   }
 
+  if ((mode && mode.toLowerCase() !== 'buyer') || extra.length > 0) {
+    await ctx.reply(usage);
+    return;
+  }
+  const buyerKey = mode !== undefined;
+
   const workspace = findWorkspace(getGroup(chatId).workspace);
   try {
     await getConcurrency({ baseUrl: workspace?.baseUrl || config.baseUrl, apiKey: key });
@@ -329,9 +380,16 @@ bot.command('setapikey', async ctx => {
     return;
   }
 
-  updateGroup(chatId, { apiKey: key, title: (ctx.chat as any).title });
+  updateGroup(chatId, { apiKey: key, buyerKey: buyerKey || undefined, title: (ctx.chat as any).title });
+  // A buyer chat keeps only the reports it is allowed to run
+  const stopped = buyerKey
+    ? Object.keys(getGroup(chatId).autoruns || {}).filter(command => !BUYER_KEY_REPORTS.includes(command) && stopAutorun(chatId, command))
+    : [];
+  await syncChatCommands(chatId);
   await ctx.reply(
     `API key saved (${maskKey(key)}).` +
+    (buyerKey ? '\nBuyer key: this chat now only shows /viewdestinations. Set the key again without "buyer" to undo.' : '') +
+    (stopped.length > 0 ? `\nStopped autoruns: ${stopped.map(c => `/${c}`).join(', ')}` : '') +
     (deleted ? '' : '\nI could not delete your message. Delete it yourself, or make me an admin with "Delete messages" permission.')
   );
 });
@@ -425,7 +483,7 @@ const REPORTS: Record<string, Report> = {
 
   // Destinations are the numbers that received calls in the chat's date window
   viewdestinations: async (chatId, group) => {
-    if (!group.buyer && !canViewPlatform(chatId, group)) throw new ChatError(NOT_AVAILABLE);
+    if (!group.buyer && !group.buyerKey && !canViewPlatform(chatId, group)) throw new ChatError(NOT_AVAILABLE);
     const creds = chatCredentials(group);
     const buyerId = await buyerIdFor(chatId, group, creds);
     if (group.buyer && !buyerId) {
@@ -438,7 +496,8 @@ const REPORTS: Record<string, Report> = {
       // In a buyer group, never show numbers that belong to someone else
       buyerId ? rows.filter(d => d.buyer_id === buyerId) : rows,
       {
-        showBuyer: !buyerId,
+        // A buyer key only sees its own buyer's numbers
+        showBuyer: !buyerId && !group.buyerKey,
         showLive: !range || range.to >= todayInTimezone(),
         singleDay: !range || range.from === range.to,
         period: label,
@@ -540,6 +599,7 @@ const migrateChat = (fromChatId: number, toChatId: number): void => {
   clearChatTimers(fromChatId);
   moveGroup(fromChatId, toChatId);
   restoreChatAutoruns(toChatId);
+  void syncChatCommands(toChatId);
 };
 
 const describeAutoruns = (group: GroupSettings): string => {

@@ -71,7 +71,7 @@ Group settings live in `data/groups.json` on the VPS; the update steps never ove
 ## Setting up a group
 
 1. Add the bot to the group. Make it an admin with **Delete messages** so `/setapikey` can remove the key from the chat.
-2. `/setapikey sk_live_...`: required. Use the bot key for an ops group, or the buyer's own key so a buyer group only sees that buyer's data.
+2. `/setapikey sk_live_...`: required. Use the bot key for an ops group, or the buyer's own key so a buyer group only sees that buyer's data. Add `buyer` after a buyer's key (`/setapikey sk_live_... buyer`) to limit the group to `/viewdestinations`.
 3. `/setworkspace Main`: optional. Only needed to point the group at a different API address from `WORKSPACE_n_*`.
 4. `/setbuyer Q06`: for a buyer group. The name is checked against the platform.
 
@@ -98,6 +98,12 @@ upgrades a group to a supergroup (new chat ID), its settings move with it.
 In a group with a buyer set, `/viewbuyers` and `/viewmissed` show only that buyer, and
 `/viewcampaigns` and `/getccupdate` are disabled. `ADMIN_CHAT_IDS` limits the platform-wide
 commands to specific chats.
+
+`/setapikey KEY buyer` marks the key as a buyer's own key. That chat's command menu and `/help` then
+show only `/viewdestinations` (with `start MINUTES` / `stop`), and every other command is ignored.
+Admins can still use the setup commands (`/setapikey`, `/setworkspace`, `/setbuyer`, `/settings`,
+`/changedate`, `/cancel`, `/stopauto`) there; they are just not shown. Setting the key again without
+`buyer`, or `/setapikey clear`, turns this off.
 
 ## How `/getccupdate` is calculated
 

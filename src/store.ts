@@ -12,6 +12,8 @@ export interface GroupSettings {
   title?: string;
   workspace?: string;
   apiKey?: string;
+  // Set with "/setapikey KEY buyer": the chat only gets /viewdestinations
+  buyerKey?: boolean;
   buyer?: string;
   // Resolved from the buyer name when /setbuyer runs
   buyerId?: string;
