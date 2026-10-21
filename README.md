@@ -90,20 +90,20 @@ Then `/viewdestinations` shows live/cc and incoming/cap for each of the buyer's 
 | `/COMMAND start [MINUTES]` | Autorun (group admins): post any statistics command now and then every MINUTES (default 5) in this chat, e.g. `/viewdestinations start 5` |
 | `/COMMAND stop`, `/stopauto` | Stop one autorun, or every autorun in this chat |
 | `/settings` | The group's current setup, including its autoruns |
+| `/clearconfig` | Remove the group's API key, buyer and workspace, and stop its autoruns (group admins) |
 
 Every setting (workspace, API key, buyer, date, autoruns) belongs to the chat it was set in and is saved
 in `DATA_FILE`, so commands in one group never change the bot in another. When Telegram
 upgrades a group to a supergroup (new chat ID), its settings move with it.
 
-In a group with a buyer set, `/viewbuyers` and `/viewmissed` show only that buyer, and
-`/viewcampaigns` and `/getccupdate` are disabled. `ADMIN_CHAT_IDS` limits the platform-wide
-commands to specific chats.
+`ADMIN_CHAT_IDS` limits the platform-wide commands to specific chats.
 
-`/setapikey KEY buyer` marks the key as a buyer's own key. That chat's command menu and `/help` then
-show only `/viewdestinations` (with `start MINUTES` / `stop`), and every other command is ignored.
-Admins can still use the setup commands (`/setapikey`, `/setworkspace`, `/setbuyer`, `/settings`,
-`/changedate`, `/cancel`, `/stopauto`) there; they are just not shown. Setting the key again without
-`buyer`, or `/setapikey clear`, turns this off.
+A chat becomes a **buyer chat** when a buyer is set with `/setbuyer NAME`, or when its key is set with
+`/setapikey KEY buyer` (a buyer's own key). A buyer chat's command menu and `/help` show only
+`/viewdestinations` (with `start MINUTES` / `stop`), and every other command is ignored. Autoruns of
+other commands are stopped. Admins can still use the setup commands (`/setapikey`, `/setworkspace`,
+`/setbuyer`, `/clearconfig`, `/settings`, `/changedate`, `/cancel`, `/stopauto`) there; they are just
+not shown. `/setbuyer clear` plus setting the key without `buyer` (or just `/clearconfig`) turns it off.
 
 ## How `/getccupdate` is calculated
 
