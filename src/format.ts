@@ -1,6 +1,7 @@
 // src/format.ts
-// Builds the Telegram messages (HTML parse mode). Every tag opens and closes on
-// the same line so long messages can be split on line breaks safely.
+// Builds the Telegram messages (HTML parse mode). Results go in a <pre> block so every
+// client (iOS included) renders them monospace and padded columns line up. Other tags
+// open and close on the same line; splitMessage keeps <pre> balanced across chunks.
 import { BuyerRow, CampaignRow, DestinationRow, displayNumber, MissedRow } from './api';
 
 const SEPARATOR = '-----------------';
@@ -8,6 +9,31 @@ const CC_SEPARATOR = '-----------------------------';
 
 export const escapeHtml = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Width in characters, not UTF-16 units, so names with accents or emoji pad correctly
+const width = (text: string): number => Array.from(text).length;
+
+const padRight = (text: string, size: number): string => text + ' '.repeat(Math.max(0, size - width(text)));
+
+// Lines are escaped here, after padding, so entities don't count toward the width
+const mono = (lines: string[]): string => `<pre>${lines.map(escapeHtml).join('\n')}</pre>`;
+
+type Pair = [string, string | number];
+
+// "Label    => value", with the arrows lined up
+const fields = (pairs: Pair[]): string[] => {
+  const size = Math.max(...pairs.map(([label]) => width(label)));
+  return pairs.map(([label, value]) => `${padRight(label, size)} => ${value}`);
+};
+
+// "Name   - value", with the dashes lined up
+const columns = (pairs: Pair[]): string[] => {
+  const size = Math.max(...pairs.map(([name]) => width(name)));
+  return pairs.map(([name, value]) => `${padRight(name, size)} - ${value}`);
+};
+
+// Report blocks, each followed by a separator line
+const blocksOf = (blocks: string[][]): string[] => blocks.flatMap(lines => [...lines, SEPARATOR]);
 
 // period is shown only when the chat is not on today, e.g. "Buyers statistics (2026-10-10):"
 const header = (title: string, period?: string): string =>
@@ -30,29 +56,29 @@ const sameName = (a: string | null | undefined, b: string | null | undefined): b
 
 export const formatBuyers = (rows: BuyerRow[], onlyBuyer?: string, period?: string): string => {
   const buyers = rows.filter(r => r.buyer_name && (!onlyBuyer || sameName(r.buyer_name, onlyBuyer)));
-  if (buyers.length === 0) return header('Buyers statistics', period) + `No buyer activity ${period ? 'for this period' : 'today'}.`;
+  if (buyers.length === 0) return header('Buyers statistics', period) + mono([`No buyer activity ${period ? 'for this period' : 'today'}.`]);
 
-  const blocks = buyers.map(b =>
-    `Buyer =&gt; ${escapeHtml(b.buyer_name)}\n` +
-    `Live =&gt; ${b.live_calls || 0}\n` +
-    `Incoming =&gt; ${b.total_calls || 0}\n` +
-    `AHT =&gt; ${formatAht(b.avg_duration)}`
-  );
-  return header('Buyers statistics', period) + blocks.join(`\n${SEPARATOR}\n`) + `\n${SEPARATOR}`;
+  const blocks = buyers.map(b => fields([
+    ['Buyer', b.buyer_name],
+    ['Live', b.live_calls || 0],
+    ['Incoming', b.total_calls || 0],
+    ['AHT', formatAht(b.avg_duration)],
+  ]));
+  return header('Buyers statistics', period) + mono(blocksOf(blocks));
 };
 
 export const formatCampaigns = (rows: CampaignRow[], period?: string): string => {
   const campaigns = rows.filter(r => r.campaign_name).sort((a, b) => naturalCompare(a.campaign_name, b.campaign_name));
-  if (campaigns.length === 0) return header('Campaigns statistics', period) + `No campaign activity ${period ? 'for this period' : 'today'}.`;
+  if (campaigns.length === 0) return header('Campaigns statistics', period) + mono([`No campaign activity ${period ? 'for this period' : 'today'}.`]);
 
-  const blocks = campaigns.map(c =>
-    `Campaign =&gt; ${escapeHtml(c.campaign_name)}\n` +
-    `Live =&gt; ${c.live_calls || 0}\n` +
-    `Incoming =&gt; ${c.total_calls || 0}\n` +
-    `Converted =&gt; ${c.converted_calls || 0}\n` +
-    `AHT =&gt; ${formatAht(c.avg_duration)}`
-  );
-  return header('Campaigns statistics', period) + blocks.join(`\n${SEPARATOR}\n`) + `\n${SEPARATOR}`;
+  const blocks = campaigns.map(c => fields([
+    ['Campaign', c.campaign_name],
+    ['Live', c.live_calls || 0],
+    ['Incoming', c.total_calls || 0],
+    ['Converted', c.converted_calls || 0],
+    ['AHT', formatAht(c.avg_duration)],
+  ]));
+  return header('Campaigns statistics', period) + mono(blocksOf(blocks));
 };
 
 export const formatMissed = (rows: MissedRow[], onlyBuyer?: string, period?: string): string => {
@@ -60,9 +86,9 @@ export const formatMissed = (rows: MissedRow[], onlyBuyer?: string, period?: str
   const buyers = rows
     .filter(r => r.id && r.name && (!onlyBuyer || sameName(r.name, onlyBuyer)))
     .sort((a, b) => a.missed - b.missed || naturalCompare(a.name, b.name));
-  if (buyers.length === 0) return header('Missed calls statistics', period) + `No buyer activity ${period ? 'for this period' : 'today'}.`;
+  if (buyers.length === 0) return header('Missed calls statistics', period) + mono([`No buyer activity ${period ? 'for this period' : 'today'}.`]);
 
-  return header('Missed calls statistics', period) + buyers.map(b => `${escapeHtml(b.name)} - ${b.missed}`).join('\n');
+  return header('Missed calls statistics', period) + mono(columns(buyers.map((b): Pair => [b.name, b.missed])));
 };
 
 // A cap of 0 means uncapped
@@ -90,19 +116,19 @@ export const formatDestinations = (rows: DestinationRow[], view: DestinationView
   const destinations = uniqueByNumber(rows).sort((a, b) =>
     naturalCompare(a.buyer_name || '', b.buyer_name || '') || b.incoming_calls - a.incoming_calls || b.live_calls - a.live_calls);
   if (destinations.length === 0) {
-    return header('Destinations statistics', view.period) + `No calls to these numbers ${view.period ? 'for this period' : 'today'}.`;
+    return header('Destinations statistics', view.period) + mono([`No calls to these numbers ${view.period ? 'for this period' : 'today'}.`]);
   }
 
   const blocks = destinations.map(d => {
-    const lines = [`Destination =&gt; ${displayNumber(d.tfn)}`];
-    if (view.showBuyer) lines.push(`Buyer =&gt; ${escapeHtml(d.buyer_name || 'Unassigned')}`);
-    if (view.showLive) lines.push(`Live =&gt; ${d.live_calls || 0}/${capText(d.concurrency_cap)} (cc)`);
-    lines.push(view.singleDay
-      ? `Incoming =&gt; ${d.incoming_calls || 0}/${capText(d.daily_cap)} (cap)`
-      : `Incoming =&gt; ${d.incoming_calls || 0}`);
-    return lines.join('\n');
+    const pairs: Pair[] = [['Destination', displayNumber(d.tfn)]];
+    if (view.showBuyer) pairs.push(['Buyer', d.buyer_name || 'Unassigned']);
+    if (view.showLive) pairs.push(['Live', `${d.live_calls || 0}/${capText(d.concurrency_cap)} (cc)`]);
+    pairs.push(['Incoming', view.singleDay
+      ? `${d.incoming_calls || 0}/${capText(d.daily_cap)} (cap)`
+      : d.incoming_calls || 0]);
+    return fields(pairs);
   });
-  return header('Destinations statistics', view.period) + blocks.join(`\n${SEPARATOR}\n`) + `\n${SEPARATOR}`;
+  return header('Destinations statistics', view.period) + mono(blocksOf(blocks));
 };
 
 // An enabled destination still takes calls unless one of its call caps is used up
@@ -153,28 +179,38 @@ export const formatCcUpdate = (buyers: BuyerCapacity[]): string => {
   const totalCc = capped.reduce((sum, b) => sum + b.cc, 0);
   const freeCc = Math.max(0, totalCc - capped.reduce((sum, b) => sum + b.live, 0));
 
-  const lines = [
-    ...active.map(b => `${escapeHtml(b.name)} - ${b.uncapped ? '∞' : b.cc}`),
-    ...eod.map(b => `${escapeHtml(b.name)} - ${b.cc} EOD`),
-  ];
+  // Buyers and totals share one column so every dash lines up
+  const rows = columns([
+    ...active.map((b): Pair => [b.name, b.uncapped ? '∞' : b.cc]),
+    ...eod.map((b): Pair => [b.name, `${b.cc} EOD`]),
+    ['Total CC', totalCc],
+    ['Free CC', freeCc],
+  ]);
+  const buyerRows = rows.slice(0, -2);
 
-  let text = header('Concurrent calls statistics');
-  text += lines.length > 0 ? lines.join('\n') : 'No buyers found.';
-  text += `\n${CC_SEPARATOR}\nTotal CC - ${totalCc}\nFree CC - ${freeCc}`;
-  return text;
+  return header('Concurrent calls statistics') + mono([
+    ...(buyerRows.length > 0 ? buyerRows : ['No buyers found.']),
+    CC_SEPARATOR,
+    ...rows.slice(-2),
+  ]);
 };
 
-// Telegram rejects messages over 4096 chars; split on line breaks
+// Telegram rejects messages over 4096 chars; split on line breaks. A <pre> block cut
+// in two is closed at the end of one chunk and reopened at the start of the next.
 export const splitMessage = (text: string, limit = 4000): string[] => {
   const chunks: string[] = [];
   let current = '';
+  let inPre = false;
   for (const line of text.split('\n')) {
-    if (current.length + line.length + 1 > limit && current.length > 0) {
-      chunks.push(current);
-      current = '';
+    if (current.length + line.length + 1 + '</pre>'.length > limit && current.length > 0) {
+      chunks.push(inPre ? `${current}</pre>` : current);
+      current = inPre ? '<pre>' : '';
     }
-    current += (current ? '\n' : '') + line;
+    current += (current && current !== '<pre>' ? '\n' : '') + line;
+    const opens = line.lastIndexOf('<pre>');
+    const closes = line.lastIndexOf('</pre>');
+    if (opens !== closes) inPre = opens > closes;
   }
-  if (current) chunks.push(current);
+  if (current && current !== '<pre>') chunks.push(current);
   return chunks;
 };
