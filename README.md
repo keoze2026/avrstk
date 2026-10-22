@@ -99,8 +99,8 @@ upgrades a group to a supergroup (new chat ID), its settings move with it.
 `ADMIN_CHAT_IDS` limits the platform-wide commands to specific chats.
 
 A chat becomes a **buyer chat** when a buyer is set with `/setbuyer NAME`, or when its key is set with
-`/setapikey KEY buyer` (a buyer's own key). A buyer chat's command menu and `/help` show only
-`/viewdestinations` (with `start MINUTES` / `stop`), and every other command is ignored. Autoruns of
+`/setapikey KEY buyer` (a buyer's own key). A buyer chat's `/help` shows only `/viewdestinations`,
+and every other command is ignored. Autoruns of
 other commands are stopped. Admins can still use the setup commands (`/setapikey`, `/setworkspace`,
 `/setbuyer`, `/clearconfig`, `/settings`, `/changedate`, `/cancel`, `/stopauto`) there; they are just
 not shown. `/setbuyer clear` plus setting the key without `buyer` (or just `/clearconfig`) turns it off.

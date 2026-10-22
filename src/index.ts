@@ -112,20 +112,16 @@ bot.use(async (ctx, next) => {
   if (BUYER_CHAT_ADMIN_COMMANDS.includes(command) && (await canConfigure(ctx))) return next();
 });
 
-// Buyer chats get their own command menu; other chats use the bot-wide one
-const syncChatCommands = async (chatId: number): Promise<void> => {
-  const scope = { type: 'chat' as const, chat_id: chatId };
-  try {
-    if (isBuyerChat(getGroup(chatId))) {
-      await bot.telegram.setMyCommands(
-        [{ command: 'viewdestinations', description: 'Live and incoming for your numbers. Add start MINUTES or stop' }],
-        { scope }
-      );
-    } else {
-      await bot.telegram.deleteMyCommands({ scope });
+// Commands are listed only by /help, not in Telegram's command menu. Menus set by older versions
+// (bot-wide, and per chat for buyer chats) stay until deleted, so they are cleared on startup.
+const clearCommandMenus = async (chatIds: number[]): Promise<void> => {
+  const scopes = [undefined, ...chatIds.map(chatId => ({ type: 'chat' as const, chat_id: chatId }))];
+  for (const scope of scopes) {
+    try {
+      await bot.telegram.deleteMyCommands(scope ? { scope } : undefined);
+    } catch (error) {
+      logError(`Command menu for ${scope ? `chat ${scope.chat_id}` : 'all chats'}`, error);
     }
-  } catch (error) {
-    logError(`Command menu for chat ${chatId}`, error);
   }
 };
 
@@ -232,9 +228,7 @@ const applyDate = async (ctx: Context, input: string): Promise<void> => {
 
 const buyerHelpText = (chatId: number): string =>
   `<b>Avortyx Stats Bot</b>\n\n` +
-  `/viewdestinations — Live and incoming for your numbers that received calls\n` +
-  `/viewdestinations start MINUTES — Post it now and then every MINUTES in this chat (group admins)\n` +
-  `/viewdestinations stop — Stop posting it (group admins)\n\n` +
+  `/viewdestinations — Live and incoming for your numbers that received calls\n\n` +
   `Stats are for ${escapeHtml(chatPeriod(chatId).label || `today (${config.timezone})`)}.`;
 
 const helpText = (): string =>
@@ -357,7 +351,6 @@ bot.command('setapikey', async ctx => {
   }
   if (CLEAR_WORDS.includes(key.toLowerCase())) {
     updateGroup(chatId, { apiKey: undefined, buyerKey: undefined, title: (ctx.chat as any).title });
-    await syncChatCommands(chatId);
     await ctx.reply('API key cleared. Stats commands will not work in this chat until /setapikey is used again.');
     return;
   }
@@ -386,7 +379,6 @@ bot.command('setapikey', async ctx => {
 
   updateGroup(chatId, { apiKey: key, buyerKey: buyerKey || undefined, title: (ctx.chat as any).title });
   const stopped = stopBlockedAutoruns(chatId);
-  await syncChatCommands(chatId);
   await ctx.reply(
     `API key saved (${maskKey(key)}).` +
     (buyerKey ? '\nBuyer key: this chat now only shows /viewdestinations. Set the key again without "buyer" to undo.' : '') +
@@ -420,7 +412,6 @@ bot.command('setbuyer', runCommand('setbuyer', async (ctx, group) => {
   }
   if (CLEAR_WORDS.includes(name.toLowerCase())) {
     updateGroup(chatId, { buyer: undefined, buyerId: undefined, title: (ctx.chat as any).title });
-    await syncChatCommands(chatId);
     await ctx.reply(
       getGroup(chatId).buyerKey
         ? 'Buyer cleared. This chat still only shows /viewdestinations because its API key is a buyer key.'
@@ -439,7 +430,6 @@ bot.command('setbuyer', runCommand('setbuyer', async (ctx, group) => {
 
   updateGroup(chatId, { buyer: buyer.buyer_name, buyerId: buyer.buyer_id, title: (ctx.chat as any).title });
   const stopped = stopBlockedAutoruns(chatId);
-  await syncChatCommands(chatId);
   await ctx.reply(
     `Buyer set to "${buyer.buyer_name}"${buyer.status === 'paused' ? ' (currently paused)' : ''}.\n` +
     `This chat now only shows /viewdestinations, with this buyer's numbers that receive calls. ` +
@@ -461,7 +451,6 @@ bot.command('clearconfig', async ctx => {
     workspace: undefined,
     title: (ctx.chat as any).title,
   });
-  await syncChatCommands(chatId);
   await ctx.reply(
     'Removed this chat\'s API key, buyer and workspace. Set it up again with /setapikey KEY.' + describeStopped(stopped)
   );
@@ -638,7 +627,6 @@ const migrateChat = (fromChatId: number, toChatId: number): void => {
   clearChatTimers(fromChatId);
   moveGroup(fromChatId, toChatId);
   restoreChatAutoruns(toChatId);
-  void syncChatCommands(toChatId);
 };
 
 const describeAutoruns = (group: GroupSettings): string => {
@@ -758,31 +746,14 @@ const startServer = async () => {
       .on('error', error => logError(`Health check could not use port ${config.port}, continuing without it`, error));
   }
 
-  await bot.telegram.setMyCommands([
-    { command: 'viewbuyers', description: 'Live, incoming and AHT per buyer' },
-    { command: 'viewcampaigns', description: 'Live, incoming, converted and AHT per campaign' },
-    { command: 'viewmissed', description: 'Missed calls per buyer' },
-    { command: 'getccupdate', description: 'Concurrent call capacity per buyer' },
-    { command: 'viewdestinations', description: "Live and incoming for the buyer's numbers" },
-    { command: 'stopauto', description: 'Stop all autoruns in this chat' },
-    { command: 'setworkspace', description: 'Set the workspace for this group' },
-    { command: 'setapikey', description: 'Set an API key for this group' },
-    { command: 'setbuyer', description: 'Link this group to a buyer' },
-    { command: 'clearconfig', description: "Remove this group's API key, buyer and workspace" },
-    { command: 'changedate', description: 'Fetch stats for a specific date or range' },
-    { command: 'settings', description: "Show this group's setup" },
-    { command: 'help', description: 'Show help' },
-  ]);
+  await clearCommandMenus(allGroups().map(g => g.chatId));
 
   // launch() resolves only when the bot stops, so don't await it
   bot
     .launch(() => {
       log(`Bot @${bot.botInfo?.username} running`);
-      // Buyer chats set up before they were limited to /viewdestinations: fix their menu and autoruns
-      allGroups().filter(isBuyerChat).forEach(g => {
-        stopBlockedAutoruns(g.chatId);
-        void syncChatCommands(g.chatId);
-      });
+      // Buyer chats set up before they were limited to /viewdestinations: stop their other autoruns
+      allGroups().filter(isBuyerChat).forEach(g => stopBlockedAutoruns(g.chatId));
       const restored = allGroups().reduce((count, g) => count + restoreChatAutoruns(g.chatId), 0);
       if (restored > 0) log(`Restored ${restored} autorun(s)`);
     })
