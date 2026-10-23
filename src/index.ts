@@ -37,6 +37,27 @@ import { log, logError, redact } from './logger';
 const bot = new Telegraf(config.telegramBotToken);
 const app = express();
 
+// In groups, tapping a /command in a message sends "/command@Avrstkbot". Commands in sent messages
+// are shown as code instead, so tapping copies them. Text already in <code>, <pre> or a tag is left
+// alone; plain-text messages that mention a command are escaped and sent as HTML.
+const COMMAND = /(^|[\s(,"])(\/[a-z]\w*)/gi;
+const unlinkCommands = (html: string): string =>
+  html
+    .split(/(<code>[\s\S]*?<\/code>|<pre>[\s\S]*?<\/pre>|<[^>]+>)/)
+    .map((part, i) => (i % 2 ? part : part.replace(COMMAND, '$1<code>$2</code>')))
+    .join('');
+
+const callApi = bot.telegram.callApi.bind(bot.telegram);
+bot.telegram.callApi = ((method: string, payload: any, options?: any) => {
+  if (method === 'sendMessage' && typeof payload?.text === 'string') {
+    const html = payload.parse_mode === 'HTML';
+    if (html || (!payload.parse_mode && !payload.entities && new RegExp(COMMAND.source, 'i').test(payload.text))) {
+      payload = { ...payload, parse_mode: 'HTML', text: unlinkCommands(html ? payload.text : escapeHtml(payload.text)) };
+    }
+  }
+  return callApi(method as any, payload, options);
+}) as typeof bot.telegram.callApi;
+
 // One line per command, so the API responses that follow have context
 bot.use(async (ctx, next) => {
   const text = (ctx.message as any)?.text as string | undefined;
