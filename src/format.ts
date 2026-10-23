@@ -120,7 +120,7 @@ export const formatDestinations = (rows: DestinationRow[], view: DestinationView
   }
 
   const blocks = destinations.map(d => {
-    const pairs: Pair[] = [['Destination', displayNumber(d.tfn)]];
+    const pairs: Pair[] = [['Name', d.name || '-'], ['Destination', displayNumber(d.tfn)]];
     if (view.showBuyer) pairs.push(['Buyer', d.buyer_name || 'Unassigned']);
     if (view.showLive) pairs.push(['Live', `${d.live_calls || 0}/${capText(d.concurrency_cap)} (cc)`]);
     pairs.push(['Incoming', view.singleDay
