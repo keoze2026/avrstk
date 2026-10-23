@@ -1,6 +1,6 @@
 // src/index.ts
 import express from 'express';
-import { Telegraf, Context } from 'telegraf';
+import { Telegraf, Telegram, Context } from 'telegraf';
 import { config, findWorkspace } from './config';
 import {
   ApiCredentials,
@@ -47,16 +47,18 @@ const unlinkCommands = (html: string): string =>
     .map((part, i) => (i % 2 ? part : part.replace(COMMAND, '$1<code>$2</code>')))
     .join('');
 
-const callApi = bot.telegram.callApi.bind(bot.telegram);
-bot.telegram.callApi = ((method: string, payload: any, options?: any) => {
+// Patched on the prototype: Telegraf makes a new Telegram instance for every update, so ctx.reply
+// does not go through bot.telegram
+const callApi = Telegram.prototype.callApi;
+Telegram.prototype.callApi = function (this: Telegram, method: string, payload: any, options?: any) {
   if (method === 'sendMessage' && typeof payload?.text === 'string') {
     const html = payload.parse_mode === 'HTML';
     if (html || (!payload.parse_mode && !payload.entities && new RegExp(COMMAND.source, 'i').test(payload.text))) {
       payload = { ...payload, parse_mode: 'HTML', text: unlinkCommands(html ? payload.text : escapeHtml(payload.text)) };
     }
   }
-  return callApi(method as any, payload, options);
-}) as typeof bot.telegram.callApi;
+  return callApi.call(this, method as any, payload, options);
+} as typeof callApi;
 
 // One line per command, so the API responses that follow have context
 bot.use(async (ctx, next) => {
