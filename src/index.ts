@@ -151,7 +151,7 @@ const clearCommandMenus = async (chatIds: number[]): Promise<void> => {
 const requireCredentials = async (ctx: Context, group: GroupSettings): Promise<ApiCredentials | null> => {
   const creds = credentialsFor(group);
   if (!creds) {
-    await ctx.reply('This chat has no API key yet. A group admin must set one with /setapikey KEY.');
+    await ctx.reply('This chat is not set up yet.');
   }
   return creds;
 };
@@ -205,7 +205,7 @@ const parseDateInput = (input: string): { range?: DateRange; error?: string } =>
 
   const parts = value.split(/\s+to\s+|\s+-\s+|\s+/).filter(Boolean);
   if (parts.length < 1 || parts.length > 2 || !parts.every(isRealDate)) {
-    return { error: 'Invalid date. Use YYYY-MM-DD, for example 2026-10-10, or a range: 2026-10-01 2026-10-10' };
+    return { error: 'Invalid date. Use YYYY-MM-DD or YYYY-MM-DD YYYY-MM-DD.' };
   }
   const [from, to = parts[0]] = parts;
   if (from > to) return { error: 'The start date must be on or before the end date.' };
@@ -237,16 +237,11 @@ const applyDate = async (ctx: Context, input: string): Promise<void> => {
   const title = (ctx.chat as any).title;
   if (!range) {
     updateGroup(chatId, { dateRange: undefined, title });
-    await ctx.reply(`Date filter reset to today (${todayInTimezone()}).`);
+    await ctx.reply(`Date set to today (${todayInTimezone()}).`);
     return;
   }
   updateGroup(chatId, { dateRange: range, title });
-  await ctx.reply(
-    `Date filter set to ${describeRange(range)} for this chat only.\n\n` +
-    `/viewbuyers, /viewcampaigns, /viewmissed and /viewdestinations now use this date.\n` +
-    `/getccupdate always shows live figures.\n` +
-    `Use /changedate today to go back to today.`
-  );
+  await ctx.reply(`Date set to ${describeRange(range)}.`);
 };
 
 const buyerHelpText = (chatId: number): string =>
@@ -295,9 +290,9 @@ bot.command('settings', async ctx => {
     `<b>Settings for this chat</b>\n\n` +
     `Chat ID: <code>${chatId}</code>\n` +
     `Workspace: ${escapeHtml(group.workspace || 'default')}\n` +
-    `API key: ${creds ? escapeHtml(maskKey(creds.apiKey)) : 'not set (use /setapikey KEY)'}${group.buyerKey ? ' (buyer key)' : ''}\n` +
-    `Buyer: ${escapeHtml(group.buyer || 'not set (platform view)')}\n` +
-    `Commands: ${isBuyerChat(group) ? 'only /viewdestinations (buyer chat)' : 'all'}\n` +
+    `API key: ${creds ? escapeHtml(maskKey(creds.apiKey)) : 'not set'}${group.buyerKey ? ' (buyer key)' : ''}\n` +
+    `Buyer: ${escapeHtml(group.buyer || 'not set')}\n` +
+    `Commands: ${isBuyerChat(group) ? '/viewdestinations only' : 'all'}\n` +
     `Date: ${escapeHtml(chatPeriod(chatId).label || `today (${todayInTimezone()})`)}\n` +
     `Autoruns: ${escapeHtml(describeAutoruns(group))}`
   );
@@ -314,12 +309,8 @@ bot.command('changedate', async ctx => {
   pendingDate.add(`${chatId}:${ctx.from?.id}`);
   // force_reply makes the user's answer reach the bot even with group privacy mode on
   await ctx.reply(
-    `Current date filter: ${chatPeriod(chatId).label || `today (${todayInTimezone()})`}\n\n` +
-    `Reply with a new date (YYYY-MM-DD)\n` +
-    `Example: 2026-10-10\n` +
-    `Range: 2026-10-01 2026-10-10\n` +
-    `Or: yesterday, today\n` +
-    `Send /cancel to keep the current date.`,
+    `Current date: ${chatPeriod(chatId).label || `today (${todayInTimezone()})`}\n\n` +
+    `Reply with a date (YYYY-MM-DD), a range (YYYY-MM-DD YYYY-MM-DD), yesterday or today.`,
     {
       reply_markup: { force_reply: true, selective: true, input_field_placeholder: 'YYYY-MM-DD' },
       reply_parameters: { message_id: ctx.message.message_id },
@@ -330,7 +321,7 @@ bot.command('changedate', async ctx => {
 bot.command('cancel', async ctx => {
   const chatId = getChatId(ctx);
   pendingDate.delete(`${chatId}:${ctx.from?.id}`);
-  await ctx.reply(`Date change cancelled. Current date: ${chatPeriod(chatId).label || `today (${todayInTimezone()})`}`);
+  await ctx.reply(`Cancelled. Date: ${chatPeriod(chatId).label || `today (${todayInTimezone()})`}`);
 });
 
 // Setup commands
@@ -346,7 +337,7 @@ bot.command('setworkspace', async ctx => {
   }
   if (CLEAR_WORDS.includes(name.toLowerCase())) {
     updateGroup(chatId, { workspace: undefined, title: (ctx.chat as any).title });
-    await ctx.reply(`Workspace cleared. This chat now uses ${config.baseUrl}.`);
+    await ctx.reply('Workspace cleared.');
     return;
   }
 
@@ -356,17 +347,14 @@ bot.command('setworkspace', async ctx => {
     return;
   }
   updateGroup(chatId, { workspace: workspace.name, title: (ctx.chat as any).title });
-  await ctx.reply(`Workspace set to "${workspace.name}".` + (getGroup(chatId).apiKey ? '' : '\nNow set this chat\'s API key with /setapikey KEY.'));
+  await ctx.reply(`Workspace set to "${workspace.name}".`);
 });
 
 bot.command('setapikey', async ctx => {
   if (!(await requireConfigure(ctx))) return;
   const chatId = getChatId(ctx);
   const [key = '', mode, ...extra] = getArgs(ctx).split(/\s+/);
-  const usage =
-    'Usage: /setapikey KEY [buyer]\n' +
-    'Add buyer when it is a buyer\'s own key: the chat then only gets /viewdestinations.\n' +
-    'The message with the key is deleted after it is read.';
+  const usage = 'Usage: /setapikey KEY [buyer]';
 
   if (!key) {
     await ctx.reply(usage);
@@ -374,7 +362,7 @@ bot.command('setapikey', async ctx => {
   }
   if (CLEAR_WORDS.includes(key.toLowerCase())) {
     updateGroup(chatId, { apiKey: undefined, buyerKey: undefined, title: (ctx.chat as any).title });
-    await ctx.reply('API key cleared. Stats commands will not work in this chat until /setapikey is used again.');
+    await ctx.reply('API key cleared.');
     return;
   }
 
@@ -403,10 +391,9 @@ bot.command('setapikey', async ctx => {
   updateGroup(chatId, { apiKey: key, buyerKey: buyerKey || undefined, title: (ctx.chat as any).title });
   const stopped = stopBlockedAutoruns(chatId);
   await ctx.reply(
-    `API key saved (${maskKey(key)}).` +
-    (buyerKey ? '\nBuyer key: this chat now only shows /viewdestinations. Set the key again without "buyer" to undo.' : '') +
+    `API key saved (${maskKey(key)})${buyerKey ? ' as a buyer key' : ''}.` +
     describeStopped(stopped) +
-    (deleted ? '' : '\nI could not delete your message. Delete it yourself, or make me an admin with "Delete messages" permission.')
+    (deleted ? '' : '\nCould not delete the message with the key. Please delete it.')
   );
 });
 
@@ -430,16 +417,12 @@ bot.command('setbuyer', runCommand('setbuyer', async (ctx, group) => {
   const name = getArgs(ctx);
 
   if (!name) {
-    await ctx.reply('Usage: /setbuyer NAME (for example /setbuyer Q06)');
+    await ctx.reply('Usage: /setbuyer NAME');
     return;
   }
   if (CLEAR_WORDS.includes(name.toLowerCase())) {
     updateGroup(chatId, { buyer: undefined, buyerId: undefined, title: (ctx.chat as any).title });
-    await ctx.reply(
-      getGroup(chatId).buyerKey
-        ? 'Buyer cleared. This chat still only shows /viewdestinations because its API key is a buyer key.'
-        : 'Buyer cleared. This chat now has the platform view and all commands.'
-    );
+    await ctx.reply('Buyer cleared.');
     return;
   }
 
@@ -447,16 +430,14 @@ bot.command('setbuyer', runCommand('setbuyer', async (ctx, group) => {
   if (!creds) return;
   const buyer = await findBuyer(creds, name);
   if (!buyer) {
-    await ctx.reply(`No buyer named "${name}" was found. Check the spelling, or that this chat's API key can see that buyer.`);
+    await ctx.reply(`No buyer named "${name}" was found.`);
     return;
   }
 
   updateGroup(chatId, { buyer: buyer.buyer_name, buyerId: buyer.buyer_id, title: (ctx.chat as any).title });
   const stopped = stopBlockedAutoruns(chatId);
   await ctx.reply(
-    `Buyer set to "${buyer.buyer_name}"${buyer.status === 'paused' ? ' (currently paused)' : ''}.\n` +
-    `This chat now only shows /viewdestinations, with this buyer's numbers that receive calls. ` +
-    `Use /setbuyer clear or /clearconfig to undo.` +
+    `Buyer set to "${buyer.buyer_name}"${buyer.status === 'paused' ? ' (currently paused)' : ''}.` +
     describeStopped(stopped)
   );
 }));
@@ -474,9 +455,7 @@ bot.command('clearconfig', async ctx => {
     workspace: undefined,
     title: (ctx.chat as any).title,
   });
-  await ctx.reply(
-    'Removed this chat\'s API key, buyer and workspace. Set it up again with /setapikey KEY.' + describeStopped(stopped)
-  );
+  await ctx.reply('Settings cleared.' + describeStopped(stopped));
 });
 
 // Stats reports. Each one builds the message for a chat from that chat's saved settings,
@@ -488,7 +467,7 @@ const NOT_AVAILABLE = 'This command is not available in this chat.';
 
 const chatCredentials = (group: GroupSettings): ApiCredentials => {
   const creds = credentialsFor(group);
-  if (!creds) throw new ChatError('This chat has no API key yet. A group admin must set one with /setapikey KEY.');
+  if (!creds) throw new ChatError('This chat is not set up yet.');
   return creds;
 };
 
@@ -528,7 +507,7 @@ const REPORTS: Record<string, Report> = {
     const creds = chatCredentials(group);
     const buyerId = await buyerIdFor(chatId, group, creds);
     if (group.buyer && !buyerId) {
-      throw new ChatError(`Buyer "${group.buyer}" was not found. A group admin can fix it with /setbuyer NAME.`);
+      throw new ChatError(`Buyer "${group.buyer}" was not found.`);
     }
 
     const { range, label } = chatPeriod(chatId);
@@ -661,7 +640,7 @@ const describeAutoruns = (group: GroupSettings): string => {
 const statsCommand = (command: string) => async (ctx: Context) => {
   const chatId = getChatId(ctx);
   const [action = '', value] = getArgs(ctx).toLowerCase().split(/\s+/);
-  const usage = `Usage: /${command} [start MINUTES | stop]\nExample: /${command} start ${DEFAULT_INTERVAL_MINUTES}`;
+  const usage = `Usage: /${command} [start MINUTES | stop]`;
 
   if (action && action !== 'start' && action !== 'stop') {
     await ctx.reply(usage);
@@ -671,7 +650,7 @@ const statsCommand = (command: string) => async (ctx: Context) => {
   if (action && !(await requireConfigure(ctx))) return;
 
   if (action === 'stop') {
-    await ctx.reply(stopAutorun(chatId, command) ? `Autorun /${command} stopped in this chat.` : `/${command} is not on autorun in this chat.`);
+    await ctx.reply(stopAutorun(chatId, command) ? `Autorun /${command} stopped.` : `/${command} is not on autorun.`);
     return;
   }
 
@@ -679,7 +658,7 @@ const statsCommand = (command: string) => async (ctx: Context) => {
   if (action === 'start') {
     minutes = value === undefined ? DEFAULT_INTERVAL_MINUTES : Number(value);
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_INTERVAL_MINUTES) {
-      await ctx.reply(`The interval must be a whole number of minutes from 1 to ${MAX_INTERVAL_MINUTES}.\n${usage}`);
+      await ctx.reply(`Interval must be 1 to ${MAX_INTERVAL_MINUTES} minutes.`);
       return;
     }
   }
@@ -703,10 +682,7 @@ const statsCommand = (command: string) => async (ctx: Context) => {
   if (minutes !== undefined) {
     updateGroup(chatId, { autoruns: { ...getGroup(chatId).autoruns, [command]: minutes }, title: (ctx.chat as any).title });
     scheduleAutorun(chatId, command, minutes);
-    await ctx.reply(
-      `Autorun on: /${command} every ${minutes} minute${minutes === 1 ? '' : 's'} in this chat only.\n` +
-      `Stop it with /${command} stop, or /stopauto to stop all autoruns here.`
-    );
+    await ctx.reply(`Autorun on: /${command} every ${minutes} minute${minutes === 1 ? '' : 's'}.`);
   }
 };
 
@@ -721,8 +697,8 @@ bot.command('stopauto', async ctx => {
   const stopped = stopChatAutoruns(getChatId(ctx));
   await ctx.reply(
     stopped.length > 0
-      ? `Stopped autoruns in this chat: ${stopped.map(c => `/${c}`).join(', ')}\nAutoruns in other chats keep running.`
-      : 'No autoruns are running in this chat.'
+      ? `Stopped autoruns: ${stopped.map(c => `/${c}`).join(', ')}`
+      : 'No autoruns running.'
   );
 });
 

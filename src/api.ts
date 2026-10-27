@@ -146,7 +146,7 @@ const apiGet = async <T>(creds: ApiCredentials, endpoint: string, params: Record
     const body = error.response?.data?.detail || (typeof error.response?.data === 'string' ? 'not found' : error.message);
     log(`API /${endpoint}${window}${filters} ${status ?? 'FAILED'} ${Date.now() - started}ms | ${body}`);
     if (status === 401 || status === 403) {
-      throw new ApiError('API key was rejected (unauthorized). Check /setapikey or /setworkspace.', status);
+      throw new ApiError('API key was rejected.', status);
     }
     const detail = error.response?.data?.detail || error.message;
     throw new ApiError(`API request failed: ${detail}`, status);

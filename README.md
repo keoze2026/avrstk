@@ -58,7 +58,9 @@ pm2 restart avrstk-bot
 pm2 stop avrstk-bot
 ```
 
-Updating: copy the new `avrstk.tgz` over as above, then on the VPS:
+Updating: once the VPS folder is a git clone with the cron job set up, `git push origin main` deploys
+by itself within a minute (see [MAINTENANCE.md](MAINTENANCE.md), "Auto-deploy"). Without it, copy
+the new `avrstk.tgz` over as above, then on the VPS:
 
 ```bash
 cd ~/avrstk && tar -xzf avrstk.tgz && rm avrstk.tgz
