@@ -12,11 +12,11 @@
 # A manual rollback (git checkout <commit>, which leaves the branch) pauses it until the branch is checked out.
 # .env and data/groups.json are ignored by git, so a deploy never touches them.
 #
-#   * * * * * /bin/bash /root/avrstk/deploy/autodeploy.sh >> /var/log/avrstk-deploy.log 2>&1
+#   * * * * * /bin/bash /root/avrstk/avrstk/deploy/autodeploy.sh >> /var/log/avrstk-deploy.log 2>&1
 
 set -euo pipefail
 
-REPO=${AVRSTK_REPO:-/root/avrstk}
+REPO=${AVRSTK_REPO:-/root/avrstk/avrstk}
 BRANCH=main
 APP=avrstk-bot
 # cron's own PATH is only /usr/bin:/bin

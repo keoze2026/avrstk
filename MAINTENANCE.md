@@ -143,11 +143,11 @@ don't have to be consecutive. A blank base URL falls back to `AVORTYX_BASE_URL`.
 | Status / logs | `pm2 status`, `pm2 logs avrstk-bot` |
 | Restart | `pm2 restart avrstk-bot` |
 | Deploy an update | `git push origin main`. The VPS picks it up within a minute (see below) |
-| Deploy by hand (VPS) | `cd /root/avrstk && git pull && npm ci && npm run build && pm2 restart avrstk-bot` |
+| Deploy by hand (VPS) | `cd /root/avrstk/avrstk && git pull && npm ci && npm run build && pm2 restart avrstk-bot` |
 
 ### Auto-deploy
 
-This is the same system CallsTalk uses. On the VPS, `/root/avrstk` is a git clone of `main`, and cron
+This is the same system CallsTalk uses. On the VPS, `/root/avrstk/avrstk` is a git clone of `main`, and cron
 runs [deploy/autodeploy.sh](deploy/autodeploy.sh) every minute. When `main` has a new commit, the
 script pulls it and runs only the steps the changed files need:
 
@@ -160,7 +160,7 @@ script pulls it and runs only the steps the changed files need:
 If a step fails, or the bot doesn't stay up (bad token, `409 Conflict`, startup crash), the script
 puts the previous commit back, rebuilds it and restarts it. The failed commit isn't tried again;
 push a fix and that deploys as usual. To retry the same commit, for example after fixing `.env`,
-run `rm /root/avrstk/.git/autodeploy-failed`.
+run `rm /root/avrstk/avrstk/.git/autodeploy-failed`.
 
 The script does nothing, and logs why once, when files were edited on the server (`git status`),
 when `main` was force-pushed, or when `git fetch` fails. It is paused, without logging, while the
@@ -171,7 +171,7 @@ folder is on a detached commit after a roll-back.
 **Log:** `tail -50 /var/log/avrstk-deploy.log`. Each deploy starts with `deploying <new> over <old>`
 and ends with `deployed <new>`, or `FAILED` and what happened next.
 
-**Roll back:** `cd /root/avrstk && git checkout <good-commit> && npm ci && npm run build && pm2 restart avrstk-bot`.
+**Roll back:** `cd /root/avrstk/avrstk && git checkout <good-commit> && npm ci && npm run build && pm2 restart avrstk-bot`.
 That pauses auto-deploy. Once the fix is pushed, run `git checkout main && git pull` to resume it.
 
 **Turn it off:** run `crontab -e` and delete the `avrstk/deploy/autodeploy.sh` line.
