@@ -131,40 +131,39 @@ export const formatDestinations = (rows: DestinationRow[], view: DestinationView
   return header('Destinations statistics', view.period) + mono(blocksOf(blocks));
 };
 
-// An enabled destination still takes calls unless one of its call caps is used up
-const isOpen = (d: DestinationRow): boolean =>
-  d.enabled &&
-  !(d.daily_cap > 0 && d.daily_calls >= d.daily_cap) &&
-  !(d.monthly_cap > 0 && d.monthly_calls >= d.monthly_cap) &&
-  !(d.global_cap > 0 && d.global_calls >= d.global_cap);
-
 export interface BuyerCapacity {
   name: string;
   cc: number;
   uncapped: boolean;
   live: number;
   eod: boolean;
+  // Adds to Total CC / Free CC (a buyer with no enabled numbers does not)
+  counted: boolean;
 }
 
-// A buyer is EOD when it is paused or none of its destinations can take calls.
-// Active buyers count the cc of their open destinations; EOD buyers show the cc of
-// their enabled destinations (or all of them when none are enabled).
+const sumOf = (rows: DestinationRow[], field: 'concurrency_cap' | 'live_calls'): number =>
+  rows.reduce((sum, d) => sum + (d[field] || 0), 0);
+
+// Counted the way the platform's Total CC is: every enabled number counts, even past its
+// daily/monthly/global call cap (such numbers still take calls), and paused buyers count too.
+// A buyer's cc is the API's own figure, which also respects a buyer-level cap.
+// A buyer is EOD when it is paused or has no enabled numbers; one with no enabled numbers
+// shows the cc of its disabled ones but adds nothing to the totals.
 // Archived and deleted (status null) buyers are left out.
 export const buildBuyerCapacity = (buyers: BuyerRow[], destinations: DestinationRow[]): BuyerCapacity[] =>
   buyers
     .filter(b => b.status === 'active' || b.status === 'paused')
     .map(b => {
       const rows = uniqueByNumber(destinations.filter(d => d.buyer_id === b.buyer_id));
-      const open = rows.filter(isOpen);
-      const eod = b.status === 'paused' || open.length === 0;
       const enabled = rows.filter(d => d.enabled);
-      const counted = !eod ? open : enabled.length > 0 ? enabled : rows;
+      const counted = enabled.length > 0;
       return {
         name: b.buyer_name,
-        cc: counted.reduce((sum, d) => sum + (d.concurrency_cap || 0), 0),
-        uncapped: !eod && open.some(d => !d.concurrency_cap),
-        live: eod ? 0 : open.reduce((sum, d) => sum + (d.live_calls || 0), 0),
-        eod,
+        cc: counted ? b.concurrency_cap ?? sumOf(enabled, 'concurrency_cap') : sumOf(rows, 'concurrency_cap'),
+        uncapped: enabled.some(d => !d.concurrency_cap),
+        live: sumOf(enabled, 'live_calls'),
+        eod: b.status === 'paused' || !counted,
+        counted,
       };
     });
 
@@ -175,14 +174,15 @@ export const formatCcUpdate = (buyers: BuyerCapacity[]): string => {
   const eod = buyers.filter(b => b.eod).sort(order);
 
   // Uncapped buyers have no fixed capacity, so they are left out of the totals
-  const capped = active.filter(b => !b.uncapped);
+  const capped = buyers.filter(b => b.counted && !b.uncapped);
   const totalCc = capped.reduce((sum, b) => sum + b.cc, 0);
   const freeCc = Math.max(0, totalCc - capped.reduce((sum, b) => sum + b.live, 0));
 
   // Buyers and totals share one column so every dash lines up
+  const ccText = (b: BuyerCapacity): string | number => (b.uncapped ? '∞' : b.cc);
   const rows = columns([
-    ...active.map((b): Pair => [b.name, b.uncapped ? '∞' : b.cc]),
-    ...eod.map((b): Pair => [b.name, `${b.cc} EOD`]),
+    ...active.map((b): Pair => [b.name, ccText(b)]),
+    ...eod.map((b): Pair => [b.name, `${ccText(b)} EOD`]),
     ['Total CC', totalCc],
     ['Free CC', freeCc],
   ]);

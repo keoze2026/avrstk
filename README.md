@@ -111,12 +111,14 @@ not shown. `/setbuyer clear` plus setting the key without `buyer` (or just `/cle
 
 It reads today's buyers (`GET /buyers?include_idle=true`) and all destinations (`GET /destinations`):
 
+It counts the way the platform's Total CC does:
+
 - Archived buyers and deleted ones (`status: null`) are left out.
-- A destination is **open** when it is enabled and none of its daily, monthly or global call caps is used up.
-- A buyer is **EOD** when it is paused or has no open destinations.
-- An active buyer's number is the total `concurrency_cap` of its open destinations. An EOD buyer shows the cap of its enabled destinations (or all of them if none are enabled).
-- A cap of 0 means uncapped: the buyer shows `∞` and is left out of the totals.
-- **Total CC** = sum over active buyers. **Free CC** = Total CC minus their live calls.
+- A buyer's number is its `concurrency_cap` from `/buyers` (the sum over its enabled destinations, as the platform reports it).
+- Every enabled destination counts, even past its daily, monthly or global call cap: such numbers still take calls.
+- A buyer is **EOD** (listed last) when it is paused or has no enabled destinations. Paused buyers still count in the totals; a buyer with no enabled destinations shows the cap of its disabled ones but adds nothing.
+- An enabled destination with a cap of 0 is uncapped: the buyer shows `∞` and is left out of the totals.
+- **Total CC** = sum over every buyer with enabled destinations, paused ones included. **Free CC** = Total CC minus the live calls on those buyers' enabled destinations.
 
 The same number can be on more than one destination row, and its call counters belong to the number,
 so the bot counts each number once, preferring the enabled row.
