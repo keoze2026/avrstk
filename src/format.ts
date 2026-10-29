@@ -195,22 +195,54 @@ export const formatCcUpdate = (buyers: BuyerCapacity[]): string => {
   ]);
 };
 
-// Telegram rejects messages over 4096 chars; split on line breaks. A <pre> block cut
-// in two is closed at the end of one chunk and reopened at the start of the next.
+// Length as Telegram counts it, after parsing the HTML: tags drop out, an entity is one character
+const visibleLength = (text: string): number =>
+  text.replace(/<[^>]*>/g, '').replace(/&(amp|lt|gt);/g, '_').length;
+
+// A separator line ends a report block, so a message may be cut after it
+const isSeparator = (line: string): boolean => /^(<pre>)?-{10,}(<\/pre>)?$/.test(line);
+
+// Telegram rejects messages over 4096 characters. Split between report blocks, so each block
+// stays whole in one message; a block (or a report without separators) too long for one
+// message is split between lines. A <pre> block cut in two is closed at the end of one chunk
+// and reopened at the start of the next.
 export const splitMessage = (text: string, limit = 4000): string[] => {
-  const chunks: string[] = [];
-  let current = '';
-  let inPre = false;
+  const blocks: string[][] = [[]];
   for (const line of text.split('\n')) {
-    if (current.length + line.length + 1 + '</pre>'.length > limit && current.length > 0) {
-      chunks.push(inPre ? `${current}</pre>` : current);
-      current = inPre ? '<pre>' : '';
-    }
-    current += (current && current !== '<pre>' ? '\n' : '') + line;
-    const opens = line.lastIndexOf('<pre>');
-    const closes = line.lastIndexOf('</pre>');
-    if (opens !== closes) inPre = opens > closes;
+    blocks[blocks.length - 1].push(line);
+    if (isSeparator(line)) blocks.push([]);
   }
-  if (current && current !== '<pre>') chunks.push(current);
-  return chunks;
+
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let size = 0;
+  const add = (lines: string[], linesSize: number) => {
+    if (size + linesSize > limit && current.length > 0) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(...lines);
+    size += linesSize;
+  };
+  for (const block of blocks) {
+    const sizes = block.map(line => visibleLength(line) + 1);
+    const blockSize = sizes.reduce((sum, n) => sum + n, 0);
+    if (blockSize <= limit) add(block, blockSize);
+    else block.forEach((line, i) => add([line], sizes[i]));
+  }
+  if (current.length > 0) chunks.push(current);
+
+  let inPre = false;
+  return chunks
+    .map(lines => {
+      const reopen = inPre;
+      for (const line of lines) {
+        const opens = line.lastIndexOf('<pre>');
+        const closes = line.lastIndexOf('</pre>');
+        if (opens !== closes) inPre = opens > closes;
+      }
+      return (reopen ? '<pre>' : '') + lines.join('\n') + (inPre ? '</pre>' : '');
+    })
+    .filter(chunk => chunk.replace(/<\/?pre>/g, '').trim().length > 0);
 };
