@@ -474,10 +474,18 @@ const chatCredentials = (group: GroupSettings): ApiCredentials => {
 type Report = (chatId: number, group: GroupSettings) => Promise<string>;
 
 const REPORTS: Record<string, Report> = {
+  // /buyers reports live_calls as 0, so live calls come from /concurrency (the Live Monitor's
+  // figures). A window that ends before today has no live calls.
   viewbuyers: async (chatId, group) => {
     if (!group.buyer && !canViewPlatform(chatId, group)) throw new ChatError(NOT_AVAILABLE);
     const { range, label } = chatPeriod(chatId);
-    return formatBuyers(await getBuyers(chatCredentials(group), range), group.buyer, label);
+    const creds = chatCredentials(group);
+    const [buyers, concurrency] = await Promise.all([
+      getBuyers(creds, range),
+      !range || range.to >= todayInTimezone() ? getConcurrency(creds) : undefined,
+    ]);
+    const live = new Map((concurrency?.by_buyer || []).map(b => [b.id, b.cc]));
+    return formatBuyers(buyers.map(b => ({ ...b, live_calls: live.get(b.buyer_id) ?? 0 })), group.buyer, label);
   },
 
   viewcampaigns: async (chatId, group) => {

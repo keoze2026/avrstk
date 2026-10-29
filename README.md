@@ -83,7 +83,7 @@ Then `/viewdestinations` shows live/cc and incoming/cap for each of the buyer's 
 
 | Command | Output |
 | --- | --- |
-| `/viewbuyers` | Live, incoming, AHT per buyer |
+| `/viewbuyers` | Live (from `/concurrency`, as `/buyers` reports 0), incoming, AHT per buyer |
 | `/viewcampaigns` | Live, incoming, converted, AHT per campaign |
 | `/viewmissed` (`/getmissed`) | Missed calls per buyer, fewest first |
 | `/getccupdate` | Concurrency cap per buyer, EOD buyers last, Total CC / Free CC |
